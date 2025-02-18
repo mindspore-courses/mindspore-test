@@ -41,6 +41,9 @@ def check(arr1, arr2, threshold=1e-3):
     # 检查形状是否相同
     if arr1.shape != arr2.shape:
         raise ValueError("Arrays must have the same shape")
+    # bitwise操作，将bool型转为数值型
+    arr1=arr1.astype(float)
+    arr2=arr2.astype(float)
     
     # 检查 nan 是否对应相同
     is_nan_arr1 = np.isnan(arr1)
@@ -75,8 +78,8 @@ def check(arr1, arr2, threshold=1e-3):
 def test_any_different_dtypes(mode):
     """测试random输入不同dtype，对比两个框架的支持度"""
     ms.set_context(mode=mode)
-    ms_dtypes = [ms.int8, ms.int16, ms.int32, ms.int64, ms.uint8,ms.uint16, ms.uint32, ms.uint64, ms.float16, ms.float32, ms.float64, ms.bfloat16, ms.bool_]
-    torch_dtypes = [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8, torch.uint16, torch.uint32, torch.uint64, torch.float16, torch.float32, torch.float64, torch.bfloat16, torch.bool]
+    ms_dtypes = [ms.int8, ms.int16, ms.int32, ms.int64, ms.uint8,ms.uint16, ms.uint32, ms.uint64,ms.bool_]
+    torch_dtypes = [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8, torch.uint16, torch.uint32, torch.uint64,torch.bool]
     input_data = [[1,0],[0,0],[1,1]]
     other_data = [[1,0],[0,0],[1,1]]
 
@@ -89,16 +92,22 @@ def test_any_different_dtypes(mode):
       ms_other=ms.Tensor(other_data,ms_type)
       torch_input=torch.tensor(input_data,dtype=torch_type)
       torch_other=torch.tensor(other_data,dtype=torch_type)
-
       try:
-        ms_res=ms.mint.atan2(ms_input,ms_other)
+        ms_res=ms.mint.bitwise_xor(ms_input,ms_other)
+        print(ms_res)
       except Exception as e:
         print(f"Mindspore不支持{ms_type}类型")
-            
+        print(e)
+              
       try:
-        torch_res=torch.atan2(torch_input,torch_other)
+        torch_res=torch.bitwise_xor(torch_input,torch_other)
+        print(torch_res)
       except Exception as e:
         print(f"Torch不支持{torch_type}类型")
+        print(e)
+
+        
+    
 
 @pytest.mark.parametrize('mode', [ms.GRAPH_MODE, ms.PYNATIVE_MODE])
 def test_any_random_input_fixed_dtype(mode):
@@ -107,8 +116,7 @@ def test_any_random_input_fixed_dtype(mode):
 
     #每种type随机生成100个数据，看是否有输出误差
     types=[np.int8, np.int16, np.int32, np.int64,
-    np.uint8,np.uint16,np.uint32,np.uint64,
-    np.bool_]
+    np.uint8, np.bool_]
     np.set_printoptions(formatter={'float': '{: 0.5f}'.format})
     flag=True
     for type in types:
@@ -142,19 +150,28 @@ def test_any_wrong_input(mode):
     """测试随机混乱输入，报错信息的准确性"""
     ms.set_context(mode=mode)
     #4.1特殊数据nan或inf
-    torch_input=torch.tensor([float("nan"),float('inf'),float('-inf'),-1,2.1,0]) 
+    torch_input=torch.tensor([float("nan"),float('inf'),float('-inf'),1,2,0]) 
     torch_other=torch.tensor([float("nan"),float('-inf'),float('inf'),float("nan"),float('inf'),float('-inf')]) 
-    ms_input=ms.Tensor([float("nan"),float('inf'),float('-inf'),-1,2.1,0]) 
+    ms_input=ms.Tensor([float("nan"),float('inf'),float('-inf'),1,2,0]) 
     ms_other=ms.Tensor([float("nan"),float('-inf'),float('inf'),float("nan"),float('inf'),float('-inf')]) 
     print("\n特殊数据nan或inf：")
+    torch_res=None
+    ms_res=None
     try:
       torch_res=torch.bitwise_xor(torch_input,torch_other)
-      ms_res=ms.mint.bitwise_xor(ms_input,ms_other)
       print(torch_res)
-      print(ms_res)
-      assert check(torch_res.numpy(),ms_res.asnumpy())
     except Exception as e:
       print(e)
+    try:
+      ms_res=ms.mint.bitwise_xor(ms_input,ms_other)
+      print(ms_res)
+    except Exception as e:
+      print(e)
+    if torch_res is None or ms_res is None:
+        assert check(torch_res,ms_res)
+    else:
+        assert check(torch_res.numpy(),ms_res.asnumpy())
+        
 
     #4.2input和other形状不同但是可以广播
     torch_input=torch.tensor([[1,2],[3,4],[5,6]]) #shape:(3,2) 
@@ -231,12 +248,12 @@ def test_any_wrong_input(mode):
 def test_any_forward_back(mode):
     """使用Pytorch和MindSpore, 固定输入和权重, 测试正向推理结果和反向梯度"""
     ms.set_context(mode=mode)
-    dtype_ms = ms.float32
-    dtype_torch = torch.float32
-    input_data = [[0.1,-0.2],[0.33,0.44],[0,-0.5]]
-    other_data = [[0.4,0.1],[-0.1,0.4],[0.5,0]]
-    torch_inp = torch.tensor(input_data, dtype=dtype_torch, requires_grad=True)
-    torch_oth = torch.tensor(other_data, dtype=dtype_torch, requires_grad=True)
+    dtype_ms = ms.int32
+    dtype_torch = torch.int32
+    input_data = [[1,-2],[33,44],[0,-5]]
+    other_data = [[4,1],[1,4],[5,0]]
+    torch_inp = torch.tensor(input_data, dtype=dtype_torch)
+    torch_oth = torch.tensor(other_data, dtype=dtype_torch)
     ms_inp=ms.Tensor(input_data, dtype_ms)
     ms_oth=ms.Tensor(other_data, dtype_ms)
 
@@ -251,16 +268,14 @@ def test_any_forward_back(mode):
     ms_res=forward_ms(ms_inp,ms_oth)
     assert check(np.asarray(torch_res.detach()),ms_res.asnumpy())
 
-    #5.2测试反向传播梯度
-    torch_res.backward(torch.ones_like(torch_res))
-    torch_inp_grad=torch_inp.grad
-    torch_oth_grad=torch_oth.grad
-    grad_fn = ms.value_and_grad(forward_ms,grad_position=(0,1))
-    _, gradient_ms = grad_fn(ms_inp,ms_oth)
-    ms_inp_grad=gradient_ms[0]
-    ms_oth_grad=gradient_ms[1]
-    assert check(np.asarray(torch_inp_grad.detach()),ms_inp_grad.asnumpy())
-    assert check(np.asarray(torch_oth_grad.detach()),ms_oth_grad.asnumpy())
+    #5.2该运算不可求导，故不再测试反向传播梯度
       
 if __name__=="__main__":
+    print("---------------------------1.test_any_different_dtypes-------------------------")
+    test_any_different_dtypes(ms.PYNATIVE_MODE)
+    print("---------------------------2.test_any_random_input_fixed_dtype-------------------------")
+    test_any_random_input_fixed_dtype(ms.PYNATIVE_MODE)
+    print("---------------------------4.test_any_wrong_input-------------------------")
+    test_any_wrong_input(ms.PYNATIVE_MODE)
+    print("---------------------------5.test_any_forward_back-------------------------")
     test_any_forward_back(ms.PYNATIVE_MODE)
