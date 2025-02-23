@@ -11,7 +11,7 @@ class TestHardshrink:
     @pytest.mark.parametrize('dtype', [
         ms.float16,
         ms.float32,
-        pytest.param(ms.bfloat16, marks=pytest.mark.xfail(reason="bfloat16 may not be supported on all platforms")),
+        ms.bfloat16,
     ])
     def test_hardshrink_dtype_support(self, dtype):
         """测试不同数据类型的支持情况"""
