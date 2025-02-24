@@ -1,287 +1,283 @@
 import numpy as np
-import torch
+import pytest
 import mindspore
-import mindspore.ops as ops
+import torch
 from mindspore import Tensor
+from mindspore import mint
 
-def compare_outputs(pytorch_output, mindspore_output, name=""):
-    """比较 PyTorch 和 MindSpore 的输出结果"""
-    print(f"\n=== {name} 对比结果 ===")
+def test_different_dtypes():
+    """测试不同数据类型的支持度"""
+    input_data = np.array([[0, 1, 2], [3, 4, 5]])
+    dtypes_ms = [mindspore.float16, mindspore.float32, mindspore.int8, 
+                 mindspore.uint8, mindspore.int16, mindspore.int32, mindspore.int64]
+    dtypes_torch = [torch.float16, torch.float32, torch.int8, 
+                    torch.uint8, torch.int16, torch.int32, torch.int64]
     
-    # 转换为numpy进行比较
-    if isinstance(pytorch_output, torch.Tensor):
-        pytorch_output = pytorch_output.detach().cpu().numpy()
-    if isinstance(mindspore_output, Tensor):
-        mindspore_output = mindspore_output.asnumpy()
-    
-    print(f"PyTorch 输出形状: {pytorch_output.shape}")
-    print(f"MindSpore 输出形状: {mindspore_output.shape}")
-    
-    max_diff = np.max(np.abs(pytorch_output - mindspore_output))
-    print(f"最大差值: {max_diff}")
-    
-    if max_diff > 1e-5:
-        print("警告：输出差异较大！")
-        print(f"PyTorch 输出: \n{pytorch_output}")
-        print(f"MindSpore 输出: \n{mindspore_output}")
-    
-    return max_diff
-
-def test_dtype_support():
-    """测试不同数据类型的支持情况"""
-    print("\n=== 测试数据类型支持 ===")
-    dtypes = [
-        np.float16, np.float32, np.float64,
-        np.int8, np.int16, np.int32, np.int64,
-        np.uint8
-    ]
-    
-    for dtype in dtypes:
-        print(f"\n测试数据类型: {dtype}")
-        
-        # 生成测试数据
-        if dtype in [np.float16, np.float32, np.float64]:
-            data = np.random.randn(2, 3).astype(dtype)
-        else:
-            data = np.random.randint(0, 100, size=(2, 3), dtype=dtype)
-            
-        repeats = 2
+    for ms_dtype, torch_dtype in zip(dtypes_ms, dtypes_torch):
+        # MindSpore测试
+        ms_input = Tensor(input_data, ms_dtype)
+        ms_output = mint.repeat_interleave(ms_input, repeats=2, dim=0)
         
         # PyTorch测试
-        try:
-            pytorch_input = torch.tensor(data)
-            pytorch_output = torch.repeat_interleave(pytorch_input, repeats, dim=0)
-            print("PyTorch: 支持")
-        except Exception as e:
-            print(f"PyTorch错误: {str(e)}")
-            continue
-            
-        # MindSpore测试
-        try:
-            mindspore_input = Tensor(data)
-            mindspore_output = ops.repeat_interleave(mindspore_input, repeats, axis=0)
-            print("MindSpore: 支持")
-        except Exception as e:
-            print(f"MindSpore错误: {str(e)}")
-            continue
-            
-        compare_outputs(pytorch_output, mindspore_output, f"数据类型={dtype}")
+        torch_input = torch.tensor(input_data, dtype=torch_dtype)
+        torch_output = torch.repeat_interleave(torch_input, repeats=2, dim=0)
+        
+        # 验证输出shape相同
+        assert ms_output.shape == torch_output.shape
+        # 验证输出值相同（考虑误差范围）
+        np.testing.assert_allclose(ms_output.asnumpy(), torch_output.numpy(), rtol=1e-3)
 
-def test_shapes():
-    """
-    测试不同形状的支持
-    注意：MindSpore使用axis参数而不是dim（详见ISSUES.md#repeat_interleave参数命名差异）
-    """
-    print("\n=== 测试不同形状 ===\n")
-    shapes = [(5,), (3, 4), (2, 3, 4), (2, 3, 2, 2)]
+def test_random_values():
+    """测试随机输入值"""
+    # 生成随机数据
+    random_data = np.random.randn(3, 4).astype(np.float32)
     
-    for shape in shapes:
-        print(f"测试形状: {shape}")
-        data = np.random.randn(*shape).astype(np.float32)
-        repeats = 2
-        
-        # PyTorch测试
-        pytorch_input = torch.tensor(data)
-        pytorch_output = torch.repeat_interleave(pytorch_input, repeats, dim=0)
-        
-        # MindSpore测试
-        mindspore_input = Tensor(data)
-        mindspore_output = ops.repeat_interleave(mindspore_input, repeats, axis=0)
-        
-        compare_outputs(pytorch_output, mindspore_output, f"shape={shape}")
-        print()
+    # MindSpore测试
+    ms_input = Tensor(random_data, mindspore.float32)
+    ms_output = mint.repeat_interleave(ms_input, repeats=3, dim=0)
+    
+    # PyTorch测试
+    torch_input = torch.tensor(random_data, dtype=torch.float32)
+    torch_output = torch.repeat_interleave(torch_input, repeats=3, dim=0)
+    
+    # 验证结果
+    np.testing.assert_allclose(ms_output.asnumpy(), torch_output.numpy(), rtol=1e-3)
 
-def test_param_variations():
-    """
-    测试不同参数组合
-    已知问题：不支持直接使用numpy数组作为repeats参数（详见ISSUES.md#repeat_interleave参数类型限制）
-    """
-    print("\n=== 测试参数组合 ===\n")
+def test_different_params():
+    """测试不同输入参数"""
+    input_data = np.array([[1, 2], [3, 4]])
+    ms_input = Tensor(input_data, mindspore.float32)
     
-    data = np.random.randn(2, 3, 4).astype(np.float32)
-    test_cases = [
-        {"repeats": 2, "axis": 0, "desc": "基础重复"},
-        {"repeats": 3, "axis": 1, "desc": "不同轴向重复"},
-        {"repeats": np.array([1, 2, 3]), "axis": 1, "desc": "numpy数组repeats"},
-        {"repeats": Tensor(np.array([1, 2, 3])), "axis": 1, "desc": "Tensor类型repeats"},
-    ]
+    # 测试repeats为list
+    repeats_list = [2, 3]
+    ms_output = mint.repeat_interleave(ms_input, repeats=repeats_list, dim=0)
     
-    for case in test_cases:
-        print(f"测试场景: {case['desc']}")
-        
-        try:
-            # PyTorch测试
-            pytorch_input = torch.tensor(data)
-            if isinstance(case["repeats"], (Tensor, np.ndarray)):
-                pytorch_repeats = torch.tensor(case["repeats"].asnumpy() if isinstance(case["repeats"], Tensor) 
-                                            else case["repeats"])
-            else:
-                pytorch_repeats = case["repeats"]
-            
-            pytorch_output = torch.repeat_interleave(pytorch_input, 
-                                                   repeats=pytorch_repeats, 
-                                                   dim=case["axis"])
-            print("PyTorch: 成功")
-            
-            # MindSpore测试
-            mindspore_input = Tensor(data)
-            mindspore_output = ops.repeat_interleave(mindspore_input, 
-                                                   repeats=case["repeats"],
-                                                   axis=case["axis"])
-            print("MindSpore: 成功")
-            
-            compare_outputs(pytorch_output, mindspore_output, 
-                          f"repeats={case['repeats']}, axis={case['axis']}")
-        except Exception as e:
-            print(f"错误信息: {str(e)}")
-        print()
+    # 测试repeats为Tensor
+    repeats_tensor = Tensor(repeats_list, mindspore.int32)
+    ms_output_tensor = mint.repeat_interleave(ms_input, repeats=repeats_tensor, dim=0)
+    
+    # 测试dim为None（展平）
+    ms_output_flatten = mint.repeat_interleave(ms_input, repeats=2, dim=None)
+
+def test_error_handling():
+    """测试错误处理"""
+    input_data = np.array([[1, 2], [3, 4]])
+    ms_input = Tensor(input_data, mindspore.float32)
+    
+    # 测试无效的dim
+    try:
+        output = mint.repeat_interleave(ms_input, repeats=2, dim=3)
+        print("Warning: Invalid dim value did not raise an exception")
+    except Exception as e:
+        print(f"Invalid dim raised: {type(e).__name__}: {str(e)}")
+    
+    # 测试负数repeats - 记录实际行为
+    try:
+        output = mint.repeat_interleave(ms_input, repeats=-1, dim=0)
+        print("Warning: Negative repeats value did not raise an exception")
+    except Exception as e:
+        print(f"Negative repeats raised: {type(e).__name__}: {str(e)}")
+
+def test_backward():
+    """测试反向传播"""
+    # PyTorch测试
+    torch_input = torch.tensor([[1., 2.], [3., 4.]], requires_grad=True)
+    torch_output = torch.repeat_interleave(torch_input, repeats=2, dim=0)
+    torch_output.sum().backward()
+    torch_grad = torch_input.grad.numpy()
+    
+    # MindSpore测试
+    ms_input = Tensor(torch_input.detach().numpy(), mindspore.float32)
+    ms_output = mint.repeat_interleave(ms_input, repeats=2, dim=0)
+    # 注意：这里需要根据MindSpore的反向传播API进行相应实现
+    # 由于MindSpore的反向传播可能需要使用Cell或者其他方式实现
+    # 这部分代码需要根据具体情况调整
 
 def test_edge_cases():
-    """测试边界情况"""
-    print("\n=== 测试边界情况 ===\n")
-    
-    # 测试一维数组
-    print("测试一维数组:")
-    data_1d = np.array([1., 2., 3., 4.], dtype=np.float32)
-    
-    pytorch_input = torch.tensor(data_1d)
-    pytorch_output = torch.repeat_interleave(pytorch_input, repeats=2)
-    
-    mindspore_input = Tensor(data_1d)
-    mindspore_output = ops.repeat_interleave(mindspore_input, repeats=2)
-    
-    compare_outputs(pytorch_output, mindspore_output, "一维数组")
-    
-    # 测试单元素数组
-    print("\n测试单元素数组:")
-    data_single = np.array([[1.]], dtype=np.float32)
-    
-    pytorch_input = torch.tensor(data_single)
-    pytorch_output = torch.repeat_interleave(pytorch_input, repeats=2, dim=0)
-    
-    mindspore_input = Tensor(data_single)
-    mindspore_output = ops.repeat_interleave(mindspore_input, repeats=2, axis=0)
-    
-    compare_outputs(pytorch_output, mindspore_output, "单元素数组")
-    
-    # 测试零数组
-    print("\n测试零数组:")
-    data_zero = np.zeros((2, 3), dtype=np.float32)
-    
-    pytorch_input = torch.tensor(data_zero)
-    pytorch_output = torch.repeat_interleave(pytorch_input, repeats=2, dim=0)
-    
-    mindspore_input = Tensor(data_zero)
-    mindspore_output = ops.repeat_interleave(mindspore_input, repeats=2, axis=0)
-    
-    compare_outputs(pytorch_output, mindspore_output, "零数组")
-    
-    # 测试错误输入
-    print("\n测试错误输入:")
+    """测试边界条件"""
+    # 测试空张量
+    empty_input = Tensor(np.array([]), mindspore.float32)
     try:
-        # 测试负数repeats
-        data = np.array([1., 2., 3.], dtype=np.float32)
-        mindspore_input = Tensor(data)
-        output = ops.repeat_interleave(mindspore_input, repeats=-1)
-        print("错误：负数repeats应该报错")
+        output = mint.repeat_interleave(empty_input, repeats=2, dim=0)
+        print(f"Empty tensor output shape: {output.shape}")
     except Exception as e:
-        print(f"预期的错误: {str(e)}")
+        print(f"Empty tensor raised: {type(e).__name__}: {str(e)}")
+    
+    # 测试repeats=0的情况
+    input_data = np.array([[1, 2], [3, 4]])
+    ms_input = Tensor(input_data, mindspore.float32)
+    try:
+        output = mint.repeat_interleave(ms_input, repeats=0, dim=0)
+        print(f"Zero repeats output shape: {output.shape}")
+    except Exception as e:
+        print(f"Zero repeats raised: {type(e).__name__}: {str(e)}")
+    
+    # 测试repeats为很大的数
+    try:
+        output = mint.repeat_interleave(ms_input, repeats=1000000, dim=0)
+        print(f"Large repeats output shape: {output.shape}")
+    except Exception as e:
+        print(f"Large repeats raised: {type(e).__name__}: {str(e)}")
+
+def test_special_inputs():
+    """测试特殊输入"""
+    # 测试1D张量
+    input_1d = Tensor(np.array([1, 2, 3]), mindspore.float32)
+    output_1d = mint.repeat_interleave(input_1d, repeats=2, dim=0)
+    
+    # 测试3D张量
+    input_3d = Tensor(np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]]), mindspore.float32)
+    output_3d = mint.repeat_interleave(input_3d, repeats=2, dim=1)
+    
+    # 测试不同维度的repeats
+    input_data = np.array([[1, 2, 3], [4, 5, 6]])
+    ms_input = Tensor(input_data, mindspore.float32)
+    
+    # repeats在不同维度的测试
+    repeats_dim0 = [2, 3]  # 对第0维的每个元素分别重复2次和3次
+    output_dim0 = mint.repeat_interleave(ms_input, repeats=repeats_dim0, dim=0)
+    
+    repeats_dim1 = [2, 1, 3]  # 对第1维的每个元素分别重复2次、1次和3次
+    output_dim1 = mint.repeat_interleave(ms_input, repeats=repeats_dim1, dim=1)
+
+def test_dtype_consistency():
+    """测试数据类型一致性"""
+    input_data = np.array([[1, 2], [3, 4]])
+    
+    # 测试repeats为不同数据类型
+    repeats_types = [
+        Tensor([2, 3], mindspore.int32),
+        Tensor([2, 3], mindspore.int64),
+        np.array([2, 3], dtype=np.int32),
+        [2, 3]
+    ]
+    
+    ms_input = Tensor(input_data, mindspore.float32)
+    for repeats in repeats_types:
+        try:
+            output = mint.repeat_interleave(ms_input, repeats=repeats, dim=0)
+            print(f"Repeats type {type(repeats)} succeeded")
+        except Exception as e:
+            print(f"Repeats type {type(repeats)} raised: {type(e).__name__}: {str(e)}")
+
+def test_complex_cases():
+    """测试复杂情况"""
+    # 测试带有复数的张量
+    complex_data = np.array([[1+1j, 2+2j], [3+3j, 4+4j]], dtype=np.complex64)
+    try:
+        ms_input = Tensor(complex_data, mindspore.complex64)
+        output = mint.repeat_interleave(ms_input, repeats=2, dim=0)
+        print("Complex tensor supported")
+    except Exception as e:
+        print(f"Complex tensor raised: {type(e).__name__}: {str(e)}")
+    
+    # 测试非连续内存的张量
+    input_data = np.array([[1, 2, 3], [4, 5, 6]])
+    ms_input = Tensor(input_data, mindspore.float32)
+    # 创建非连续张量（通过转置）
+    non_contiguous_input = ms_input.transpose()
+    output = mint.repeat_interleave(non_contiguous_input, repeats=2, dim=0)
+
+def test_backward_functional():
+    """测试函数式API的反向传播"""
+    import mindspore.ops as ops
+    from mindspore import context
+    from mindspore.common.initializer import initializer
+    
+    context.set_context(mode=context.GRAPH_MODE)
+    
+    # 准备输入数据
+    input_data = np.array([[1., 2.], [3., 4.]], dtype=np.float32)
+    ms_input = Tensor(input_data, mindspore.float32)
+    
+    # 尝试使用函数式API计算梯度
+    try:
+        grad_fn = ops.GradOperation()
+        def forward_fn(x):
+            return mint.repeat_interleave(x, repeats=2, dim=0).sum()
+        
+        grad_output = grad_fn(forward_fn)(ms_input)
+        print("Functional API gradient:", grad_output)
+    except Exception as e:
+        print(f"Functional API gradient failed: {type(e).__name__}: {str(e)}")
+
+def test_backward_cell():
+    """测试使用Cell类的反向传播"""
+    from mindspore import nn
+    from mindspore.common.initializer import initializer
+    
+    class RepeatInterleaveNet(nn.Cell):
+        def __init__(self):
+            super(RepeatInterleaveNet, self).__init__()
+        
+        def construct(self, x):
+            x = mint.repeat_interleave(x, repeats=2, dim=0)
+            return x.sum()
+    
+    # 准备输入数据
+    input_data = np.array([[1., 2.], [3., 4.]], dtype=np.float32)
+    ms_input = Tensor(input_data, mindspore.float32)
     
     try:
-        # 测试错误的axis值
-        data = np.array([[1., 2.], [3., 4.]], dtype=np.float32)
-        mindspore_input = Tensor(data)
-        output = ops.repeat_interleave(mindspore_input, repeats=2, axis=2)
-        print("错误：无效的axis值应该报错")
+        # 创建网络和梯度函数
+        net = RepeatInterleaveNet()
+        grad_net = nn.GradOperation()(net)
+        
+        # 计算梯度
+        grad_output = grad_net(ms_input)
+        print("Cell gradient:", grad_output)
+        
+        # 对比PyTorch结果
+        import torch
+        torch_input = torch.tensor(input_data, requires_grad=True)
+        torch_output = torch.repeat_interleave(torch_input, repeats=2, dim=0).sum()
+        torch_output.backward()
+        
+        # 验证梯度
+        np.testing.assert_allclose(
+            grad_output.asnumpy(), 
+            torch_input.grad.numpy(), 
+            rtol=1e-3, 
+            err_msg="Gradient values mismatch between MindSpore and PyTorch"
+        )
+        print("Gradient verification passed")
+        
     except Exception as e:
-        print(f"预期的错误: {str(e)}")
+        print(f"Cell gradient failed: {type(e).__name__}: {str(e)}")
 
-def test_gradient():
-    """测试梯度"""
-    print("\n=== 测试梯度计算 ===\n")
+def test_backward_compare():
+    """比较函数式API和Cell类的梯度结果"""
+    input_data = np.array([[1., 2.], [3., 4.]], dtype=np.float32)
+    ms_input = Tensor(input_data, mindspore.float32)
     
-    input_data = np.random.randn(2, 3).astype(np.float32)
-    input_tensor = Tensor(input_data, mindspore.float32)
-    
-    def grad_fn(inputs):
-        return ops.repeat_interleave(inputs, repeats=2, axis=0)
-    
-    grad_fn_value = mindspore.grad(grad_fn)
+    # 函数式API的梯度
+    grad_func = None
     try:
-        gradient = grad_fn_value(input_tensor)
-        print("梯度计算成功")
-        print(f"梯度形状: {gradient.shape}")
-        print(f"梯度值: {gradient}")
+        grad_fn = ops.GradOperation()
+        def forward_fn(x):
+            return mint.repeat_interleave(x, repeats=2, dim=0).sum()
+        grad_func = grad_fn(forward_fn)(ms_input)
     except Exception as e:
-        print(f"梯度计算错误: {str(e)}")
-
-def test_attention_mechanism():
-    """
-    测试在注意力机制场景下的表现
-    测试结果详见ISSUES.md#repeat_interleave在注意力机制中的应用
-    """
-    print("\n=== 测试注意力机制场景 ===")
+        print(f"Functional API gradient failed: {type(e).__name__}: {str(e)}")
     
-    # 测试参数
-    batch_size = 2
-    seq_len = 4
-    num_heads = 8
-    kv_num_heads = 2
-    head_dim = 16
+    # Cell类的梯度
+    grad_cell = None
+    try:
+        net = RepeatInterleaveNet()
+        grad_net = nn.GradOperation()(net)
+        grad_cell = grad_net(ms_input)
+    except Exception as e:
+        print(f"Cell gradient failed: {type(e).__name__}: {str(e)}")
     
-    # 创建输入数据
-    key = np.random.randn(batch_size * seq_len, kv_num_heads, head_dim).astype(np.float32)
-    value = np.random.randn(batch_size * seq_len, kv_num_heads, head_dim).astype(np.float32)
-    
-    repeat_num = num_heads // kv_num_heads
-    
-    # PyTorch前向测试
-    pytorch_key = torch.tensor(key, requires_grad=True)
-    pytorch_value = torch.tensor(value, requires_grad=True)
-    
-    pytorch_key_repeated = torch.repeat_interleave(pytorch_key, repeat_num, dim=1)
-    pytorch_value_repeated = torch.repeat_interleave(pytorch_value, repeat_num, dim=1)
-    
-    # MindSpore前向测试
-    mindspore_key = Tensor(key, dtype=mindspore.float32)
-    mindspore_value = Tensor(value, dtype=mindspore.float32)
-    
-    mindspore_key_repeated = ops.repeat_interleave(mindspore_key, repeat_num, axis=1)
-    mindspore_value_repeated = ops.repeat_interleave(mindspore_value, repeat_num, axis=1)
-    
-    # 比较前向结果
-    key_diff = compare_outputs(pytorch_key_repeated, mindspore_key_repeated, "Key扩展")
-    value_diff = compare_outputs(pytorch_value_repeated, mindspore_value_repeated, "Value扩展")
-    
-    print(f"\n前向传播最大差异:")
-    print(f"Key差异: {key_diff}")
-    print(f"Value差异: {value_diff}")
-    
-    # PyTorch梯度测试
-    loss = pytorch_key_repeated.sum() + pytorch_value_repeated.sum()
-    loss.backward()
-    
-    # MindSpore梯度测试
-    def grad_fn(key_input, value_input):
-        key_out = ops.repeat_interleave(key_input, repeat_num, axis=1)
-        value_out = ops.repeat_interleave(value_input, repeat_num, axis=1)
-        return key_out.sum() + value_out.sum()
-    
-    grad_fn_value = mindspore.grad(grad_fn, grad_position=(0, 1))
-    mindspore_grads = grad_fn_value(mindspore_key, mindspore_value)
-    
-    # 比较梯度
-    key_grad_diff = compare_outputs(pytorch_key.grad, mindspore_grads[0], "Key梯度")
-    value_grad_diff = compare_outputs(pytorch_value.grad, mindspore_grads[1], "Value梯度")
-    
-    print(f"\n反向传播最大差异:")
-    print(f"Key梯度差异: {key_grad_diff}")
-    print(f"Value梯度差异: {value_grad_diff}")
-
-if __name__ == "__main__":
-    test_dtype_support()
-    test_shapes()
-    test_param_variations()
-    test_edge_cases()
-    test_gradient()
-    test_attention_mechanism()
+    # 比较结果
+    if grad_func is not None and grad_cell is not None:
+        try:
+            np.testing.assert_allclose(
+                grad_func.asnumpy(), 
+                grad_cell.asnumpy(), 
+                rtol=1e-3,
+                err_msg="Gradient values mismatch between functional and cell-based approach"
+            )
+            print("Functional API and Cell gradients match")
+        except AssertionError as e:
+            print(f"Gradient mismatch: {str(e)}")

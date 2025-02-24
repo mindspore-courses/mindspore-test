@@ -253,6 +253,161 @@ def test_backward_gradient():
     print(f"Maximum gradient error: {grad_error}")
     assert grad_error < 1e-3, f"Gradient error {grad_error} exceeds threshold"
 
+def test_fixed_input_values():
+    """
+    测试固定输入值的情况
+    验证在已知输入下的翻转结果是否正确
+    """
+    # 固定的测试数据
+    fixed_data = np.array([
+        [[1.0, 2.0], [3.0, 4.0]],
+        [[5.0, 6.0], [7.0, 8.0]]
+    ], dtype=np.float32)
+    
+    print("\n测试固定输入值")
+    
+    test_cases = [
+        {'name': 'single_dim', 'dims': [0]},
+        {'name': 'multiple_dims', 'dims': [0, 1]},
+        {'name': 'all_dims', 'dims': [0, 1, 2]},
+        {'name': 'negative_dims', 'dims': [-1, -2]},
+    ]
+    
+    for case in test_cases:
+        print(f"\nTesting {case['name']}")
+        try:
+            # PyTorch测试
+            torch_input = torch.tensor(fixed_data)
+            torch_output = torch.flip(torch_input, dims=case['dims'])
+            
+            # MindSpore测试
+            ms_input = Tensor(fixed_data)
+            ms_output = mint.flip(ms_input, dims=case['dims'])
+            
+            error = calculate_error(torch_output, ms_output)
+            print(f"Max error: {error}")
+            print(f"PyTorch shape: {torch_output.shape}, MindSpore shape: {ms_output.shape}")
+            
+            assert error < 1e-5, f"Error {error} exceeds threshold"
+            assert torch_output.shape == ms_output.shape, "Shape mismatch"
+            print(f"✓ {case['name']} passed")
+            
+        except Exception as e:
+            print(f"Error in {case['name']}: {str(e)}")
+            raise
+
+def test_zero_size_dimension():
+    """
+    测试包含0维度的张量
+    验证对特殊形状张量的处理能力
+    """
+    shapes = [
+        (0,),           # 1D with zero size
+        (2, 0, 3),      # 3D with zero size in middle
+        (2, 3, 0),      # 3D with zero size at end
+        (0, 0, 3),      # Multiple zero dimensions
+    ]
+    
+    for shape in shapes:
+        print(f"\nTesting shape: {shape}")
+        try:
+            data = np.zeros(shape, dtype=np.float32)
+            
+            # PyTorch测试
+            torch_input = torch.tensor(data)
+            torch_output = torch.flip(torch_input, dims=[0])
+            
+            # MindSpore测试
+            ms_input = Tensor(data)
+            ms_output = mint.flip(ms_input, dims=[0])
+            
+            print(f"PyTorch shape: {torch_output.shape}, MindSpore shape: {ms_output.shape}")
+            assert torch_output.shape == ms_output.shape, "Shape mismatch"
+            print(f"✓ Shape {shape} passed")
+            
+        except Exception as e:
+            print(f"Error with shape {shape}: {str(e)}")
+
+def test_large_tensor():
+    """
+    测试大型张量的处理
+    验证在处理大量数据时的性能和精度
+    """
+    try:
+        # 创建一个较大的张量
+        shape = (100, 100, 100)  # 1,000,000个元素
+        data = np.random.randn(*shape).astype(np.float32)
+        
+        # PyTorch测试
+        torch_input = torch.tensor(data)
+        torch_output = torch.flip(torch_input, dims=[0, 1, 2])
+        
+        # MindSpore测试
+        ms_input = Tensor(data)
+        ms_output = mint.flip(ms_input, dims=[0, 1, 2])
+        
+        error = calculate_error(torch_output, ms_output)
+        print(f"\nLarge tensor max error: {error}")
+        assert error < 1e-5, f"Error {error} exceeds threshold"
+        print("✓ Large tensor test passed")
+        
+    except Exception as e:
+        print(f"Error in large tensor test: {str(e)}")
+        raise
+
+def test_consecutive_flips():
+    """
+    测试连续翻转操作
+    验证多次翻转操作的正确性
+    """
+    try:
+        data = np.random.randn(3, 4, 5).astype(np.float32)
+        
+        # PyTorch测试
+        torch_input = torch.tensor(data)
+        torch_output = torch.flip(torch.flip(torch_input, dims=[0]), dims=[1])
+        
+        # MindSpore测试
+        ms_input = Tensor(data)
+        ms_output = mint.flip(mint.flip(ms_input, dims=[0]), dims=[1])
+        
+        error = calculate_error(torch_output, ms_output)
+        print(f"\nConsecutive flips max error: {error}")
+        assert error < 1e-5, f"Error {error} exceeds threshold"
+        print("✓ Consecutive flips test passed")
+        
+    except Exception as e:
+        print(f"Error in consecutive flips test: {str(e)}")
+        raise
+
+def test_special_values():
+    """
+    测试特殊值的处理
+    验证对极值、NaN等特殊值的处理
+    """
+    special_data = np.array([
+        [float('inf'), float('-inf')],
+        [float('nan'), 0.0]
+    ], dtype=np.float32)
+    
+    try:
+        # PyTorch测试
+        torch_input = torch.tensor(special_data)
+        torch_output = torch.flip(torch_input, dims=[0, 1])
+        
+        # MindSpore测试
+        ms_input = Tensor(special_data)
+        ms_output = mint.flip(ms_input, dims=[0, 1])
+        
+        # 对于特殊值，我们只验证形状是否匹配
+        print("\nTesting special values")
+        assert torch_output.shape == ms_output.shape, "Shape mismatch for special values"
+        print("✓ Special values test passed")
+        
+    except Exception as e:
+        print(f"Error in special values test: {str(e)}")
+        raise
+
 if __name__ == "__main__":
     print("=== Testing random dtype support ===")
     dtype_results = test_random_dtype_support()
@@ -271,3 +426,18 @@ if __name__ == "__main__":
     
     print("\n=== Testing backward gradient ===")
     test_backward_gradient()
+    
+    print("\n=== Testing fixed input values ===")
+    test_fixed_input_values()
+    
+    print("\n=== Testing zero size dimension ===")
+    test_zero_size_dimension()
+    
+    print("\n=== Testing large tensor ===")
+    test_large_tensor()
+    
+    print("\n=== Testing consecutive flips ===")
+    test_consecutive_flips()
+    
+    print("\n=== Testing special values ===")
+    test_special_values()

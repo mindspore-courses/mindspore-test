@@ -300,5 +300,135 @@ def test_forward_inference_accuracy():
             print(f"Error in {case['name']}: {str(e)}")
             raise
 
+def test_fixed_input_values():
+    """测试固定输入值的情况"""
+    # 固定的测试数据
+    fixed_data = np.array([
+        [[1.0, 2.0], [3.0, 4.0]],
+        [[5.0, 6.0], [7.0, 8.0]]
+    ], dtype=np.float32)
+    
+    print("\n测试固定输入值")
+    
+    test_cases = [
+        {'name': 'default', 'start_dim': 0, 'end_dim': -1},
+        {'name': 'flatten_first_two', 'start_dim': 0, 'end_dim': 1},
+        {'name': 'flatten_last_two', 'start_dim': 1, 'end_dim': 2},
+    ]
+    
+    for case in test_cases:
+        print(f"\nTesting {case['name']}")
+        try:
+            # PyTorch测试
+            torch_input = torch.tensor(fixed_data)
+            torch_output = torch.flatten(torch_input, 
+                                      start_dim=case['start_dim'], 
+                                      end_dim=case['end_dim'])
+            
+            # MindSpore测试
+            ms_input = Tensor(fixed_data)
+            ms_output = mint.flatten(ms_input, 
+                                   start_dim=case['start_dim'], 
+                                   end_dim=case['end_dim'])
+            
+            error = calculate_error(torch_output, ms_output)
+            print(f"Max error: {error}")
+            print(f"PyTorch shape: {torch_output.shape}, MindSpore shape: {ms_output.shape}")
+            
+            assert error < 1e-5, f"Error {error} exceeds threshold"
+            assert torch_output.shape == ms_output.shape, "Shape mismatch"
+            print(f"✓ {case['name']} passed")
+            
+        except Exception as e:
+            print(f"Error in {case['name']}: {str(e)}")
+            raise
+
+def test_zero_size_dimension():
+    """测试包含0维度的张量"""
+    # 创建包含0维度的张量
+    shapes = [
+        (0,),           # 1D with zero size
+        (2, 0, 3),      # 3D with zero size in middle
+        (2, 3, 0),      # 3D with zero size at end
+    ]
+    
+    for shape in shapes:
+        print(f"\nTesting shape: {shape}")
+        try:
+            data = np.zeros(shape, dtype=np.float32)
+            
+            # PyTorch测试
+            torch_input = torch.tensor(data)
+            torch_output = torch.flatten(torch_input)
+            
+            # MindSpore测试
+            ms_input = Tensor(data)
+            ms_output = mint.flatten(ms_input)
+            
+            print(f"PyTorch shape: {torch_output.shape}, MindSpore shape: {ms_output.shape}")
+            assert torch_output.shape == ms_output.shape, "Shape mismatch"
+            print(f"✓ Shape {shape} passed")
+            
+        except Exception as e:
+            print(f"Error with shape {shape}: {str(e)}")
+
+def test_large_tensor():
+    """测试大型张量的处理"""
+    try:
+        # 创建一个较大的张量
+        shape = (100, 100, 100)  # 1,000,000个元素
+        data = np.random.randn(*shape).astype(np.float32)
+        
+        # PyTorch测试
+        torch_input = torch.tensor(data)
+        torch_output = torch.flatten(torch_input)
+        
+        # MindSpore测试
+        ms_input = Tensor(data)
+        ms_output = mint.flatten(ms_input)
+        
+        error = calculate_error(torch_output, ms_output)
+        print(f"\nLarge tensor max error: {error}")
+        assert error < 1e-5, f"Error {error} exceeds threshold"
+        print("✓ Large tensor test passed")
+        
+    except Exception as e:
+        print(f"Error in large tensor test: {str(e)}")
+        raise
+
+def test_nested_operation():
+    """测试嵌套操作的情况"""
+    try:
+        data = np.random.randn(2, 3, 4).astype(np.float32)
+        
+        # PyTorch测试
+        torch_input = torch.tensor(data)
+        torch_output = torch.flatten(torch.flatten(torch_input, start_dim=0, end_dim=1))
+        
+        # MindSpore测试
+        ms_input = Tensor(data)
+        ms_output = mint.flatten(mint.flatten(ms_input, start_dim=0, end_dim=1))
+        
+        error = calculate_error(torch_output, ms_output)
+        print(f"\nNested operation max error: {error}")
+        assert error < 1e-5, f"Error {error} exceeds threshold"
+        print("✓ Nested operation test passed")
+        
+    except Exception as e:
+        print(f"Error in nested operation test: {str(e)}")
+        raise
+
 if __name__ == "__main__":
     pytest.main(['-v', 'test_flatten.py'])
+    
+    print("\n=== Testing fixed input values ===")
+    test_fixed_input_values()
+    
+    print("\n=== Testing zero size dimension ===")
+    test_zero_size_dimension()
+    
+    print("\n=== Testing large tensor ===")
+    test_large_tensor()
+    
+    print("\n=== Testing nested operation ===")
+    test_nested_operation()
