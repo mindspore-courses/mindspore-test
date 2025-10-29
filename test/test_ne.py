@@ -168,20 +168,44 @@ def test_framework_support(mode):
 def test_ne_forward_back(mode):
     """使用Pytorch和MindSpore, 固定输入和权重, 测试正向推理结果和反向梯度"""
     ms.set_context(mode=mode)
-    torch_tensor_x = torch.tensor(input_data_x, dtype=dtype_torch, requires_grad=True)
-    torch_tensor_y = torch.tensor(input_data_y, dtype=dtype_torch, requires_grad=True)
+    # 设计输入数据，包含可导操作路径
+    input_data_x = np.array([2.0, -3.0, 5.0], dtype=np.float32)
+    input_data_y = np.array([1.0, 0.0, 5.0], dtype=np.float32)
 
+    # 创建PyTorch张量（需计算梯度）
+    torch_x = torch.tensor(input_data_x, dtype=torch.float32, requires_grad=True)
+    torch_y = torch.tensor(input_data_y, dtype=torch.float32, requires_grad=True)
+
+    # 创建MindSpore张量
+    ms_x = ms.Tensor(input_data_x, dtype=ms.float32)
+    ms_y = ms.Tensor(input_data_y, dtype=ms.float32)
+
+    # 前向函数定义：通过可导操作触发梯度
     def forward_pt(x, y):
-        return torch.ne(x, y)
+        # 将比较结果作为掩码，与可导操作结合
+        mask = torch.ne(x, y).float()  # 布尔转浮点
+        return (x * mask).sum()  # 可导路径：x * mask
 
     def forward_ms(x, y):
-        return mint.ne(x, y)
+        mask = mint.ne(x, y).astype(ms.float32)  # 使用astype正确转换类型
+        return (x * mask).sum()
 
-    grad_fn = value_and_grad(forward_ms)
-    output_ms, gradient_ms = grad_fn(ms_tensor_x, ms_tensor_y)
-    output_pt = forward_pt(torch_tensor_x, torch_tensor_y)
-    output_pt.backward(torch.ones_like(output_pt))
-    gradient_pt = torch_tensor_x.grad
-    assert np.allclose(output_ms.asnumpy(), output_pt.detach().numpy(), atol=1e-3)
-    assert np.allclose(gradient_ms.asnumpy(), gradient_pt.numpy(), atol=1e-3)
+    # 计算MindSpore的梯度
+    grad_fn = ms.ops.value_and_grad(forward_ms, grad_position=(0, 1))
+    output_ms, (grad_x_ms, grad_y_ms) = grad_fn(ms_x, ms_y)
+    # 计算PyTorch的输出和梯度
+    output_pt = forward_pt(torch_x, torch_y)
+    # 反向传播前清零梯度
+    if torch_x.grad is not None:
+        torch_x.grad.zero_()
+    if torch_y.grad is not None:
+        torch_y.grad.zero_()
+    output_pt.backward()
 
+    grad_x_pt = torch_x.grad.numpy() if torch_x.grad is not None else np.zeros_like(input_data_x)
+    grad_y_pt = torch_y.grad.numpy() if torch_y.grad is not None else np.zeros_like(input_data_y)
+
+    # 断言
+    assert np.allclose(output_ms.asnumpy(), output_pt.detach().numpy(), atol=1e-3), "正向结果不一致"
+    assert np.allclose(grad_x_ms.asnumpy(), grad_x_pt, atol=1e-3), "x梯度不一致"
+    assert np.allclose(grad_y_ms.asnumpy(), grad_y_pt, atol=1e-3), "y梯度不一致"
